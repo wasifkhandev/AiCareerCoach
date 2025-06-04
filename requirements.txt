@@ -1,0 +1,23 @@
+# Backend Dependencies
+express==4.18.2
+mongoose==8.1.1
+cors==2.8.5
+dotenv==16.4.1
+openai==1.12.0
+langchain==0.1.0
+chromadb==0.4.22
+axios==1.6.7
+jsonwebtoken==9.0.2
+bcryptjs==2.4.3
+
+# Frontend Dependencies (package.json will be created separately)
+# React
+# React Router DOM
+# Axios
+# Material-UI
+# Redux Toolkit 
+
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/career-ai-coach
+JWT_SECRET=your-super-secret-jwt-key
+OPENAI_API_KEY=your-openai-api-key 
