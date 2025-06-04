@@ -4,25 +4,44 @@ require('dotenv').config();
 
 class PineconeService {
     constructor() {
-        if (!process.env.PINECONE_API_KEY || !process.env.PINECONE_INDEX || !process.env.OPENAI_API_KEY) {
-            throw new Error('Required environment variables are missing');
+        // Validate environment variables
+        const requiredEnvVars = {
+            PINECONE_API_KEY: process.env.PINECONE_API_KEY,
+            PINECONE_INDEX: process.env.PINECONE_INDEX,
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY
+        };
+
+        const missingVars = Object.entries(requiredEnvVars)
+            .filter(([_, value]) => !value)
+            .map(([key]) => key);
+
+        if (missingVars.length > 0) {
+            throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
         }
 
-        this.pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+        this.pinecone = new Pinecone({ 
+            apiKey: process.env.PINECONE_API_KEY
+        });
         this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
         this.initialized = false;
-        this.sourceDimensions = 1536;
-        this.targetDimensions = 1024; // Must match your Pinecone index
+        this.dimensions = 1536; // OpenAI's text-embedding-ada-002 model dimension
     }
 
     async initialize() {
         if (!this.initialized) {
             try {
                 this.pineconeIndex = this.pinecone.index(process.env.PINECONE_INDEX);
+                
+                // Verify index dimensions
+                const stats = await this.pineconeIndex.describeIndexStats();
+                if (stats.dimension !== this.dimensions) {
+                    throw new Error(`Index dimension mismatch. Expected ${this.dimensions}, got ${stats.dimension}`);
+                }
+                
                 this.initialized = true;
+                console.log('Pinecone initialized successfully');
             } catch (error) {
-                console.error('Pinecone init failed:', error);
+                console.error('Pinecone initialization failed:', error);
                 throw error;
             }
         }
@@ -40,50 +59,16 @@ class PineconeService {
             });
 
             const embedding = response.data[0]?.embedding;
-            console.log('Original embedding dimensions:', embedding?.length);
             
-            if (!embedding || embedding.length !== this.sourceDimensions) {
-                throw new Error(`Invalid embedding returned. Expected ${this.sourceDimensions}, got ${embedding?.length || 0}`);
+            if (!embedding || embedding.length !== this.dimensions) {
+                throw new Error(`Invalid embedding returned. Expected ${this.dimensions}, got ${embedding?.length || 0}`);
             }
 
-            const reduced = this.reduceDimensions(embedding);
-            console.log('Reduced embedding dimensions:', reduced?.length);
-            
-            if (!reduced || reduced.length !== this.targetDimensions) {
-                throw new Error(`Reduced embedding has invalid dimensions. Expected ${this.targetDimensions}, got ${reduced?.length || 0}`);
-            }
-
-            return reduced;
+            return embedding;
         } catch (error) {
             console.error('Error getting embedding:', error);
             throw error;
         }
-    }
-
-    reduceDimensions(embedding) {
-        if (!embedding || embedding.length !== this.sourceDimensions) {
-            throw new Error(`Invalid input embedding dimensions. Expected ${this.sourceDimensions}, got ${embedding?.length || 0}`);
-        }
-
-        const reduced = new Array(this.targetDimensions).fill(0);
-        const groupSize = Math.ceil(this.sourceDimensions / this.targetDimensions);
-
-        for (let i = 0; i < this.targetDimensions; i++) {
-            const start = i * groupSize;
-            const end = Math.min(start + groupSize, this.sourceDimensions);
-            const group = embedding.slice(start, end);
-            reduced[i] = group.reduce((sum, val) => sum + val, 0) / group.length;
-        }
-
-        // Normalize
-        const magnitude = Math.sqrt(reduced.reduce((sum, val) => sum + val * val, 0));
-        const normalized = reduced.map(val => val / magnitude);
-
-        if (normalized.length !== this.targetDimensions) {
-            throw new Error(`Normalized embedding has invalid dimensions. Expected ${this.targetDimensions}, got ${normalized.length}`);
-        }
-
-        return normalized;
     }
 
     async storeInsight(insight) {
@@ -95,32 +80,29 @@ class PineconeService {
             }
 
             const insightId = `insight_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            console.log('Generated insight ID:', insightId);
             
-            // Generate and validate embedding
+            // Generate embedding
             const embedding = await this.getEmbedding(insight.content);
-            console.log('Generated embedding dimensions:', embedding.length);
+            console.log('Generated embedding with length:', embedding.length);
             
-            if (!embedding || embedding.length !== this.targetDimensions) {
-                throw new Error(`Invalid embedding dimensions after reduction. Expected ${this.targetDimensions}, got ${embedding?.length || 0}`);
-            }
-
+            // Preserve all fields from the insight object
             const metadata = {
-                type: 'insight',
-                title: insight.title || 'Untitled',
-                content: insight.content,
-                category: insight.category || 'general',
-                timestamp: new Date().toISOString(),
-                id: insightId
+                ...insight,
+                id: insightId,
+                timestamp: new Date().toISOString()
             };
+            console.log('Storing metadata:', JSON.stringify(metadata, null, 2));
 
-            // Store in Pinecone with proper format
-            await this.pineconeIndex.upsert({
-                vectors: [{
+            // Store in Pinecone using the correct format
+            const upsertResult = await this.pineconeIndex.upsert([
+                {
                     id: insightId,
                     values: embedding,
                     metadata
-                }]
-            });
+                }
+            ]);
+            console.log('Upsert result:', JSON.stringify(upsertResult, null, 2));
 
             return insightId;
         } catch (error) {
@@ -134,7 +116,7 @@ class PineconeService {
             if (!insightId) throw new Error('Insight ID is required');
             await this.initialize();
 
-            await this.pineconeIndex.delete({ ids: [insightId] });
+            await this.pineconeIndex.deleteMany([insightId]);
             return true;
         } catch (error) {
             console.error('Error deleting insight:', error);
@@ -147,8 +129,18 @@ class PineconeService {
             if (!insightId) throw new Error('Insight ID is required');
             await this.initialize();
 
-            const result = await this.pineconeIndex.fetch({ ids: [insightId] });
-            return result.vectors?.[insightId]?.metadata || null;
+            console.log('Fetching insight with ID:', insightId);
+            const result = await this.pineconeIndex.fetch([insightId]);
+            console.log('Fetch result:', JSON.stringify(result, null, 2));
+
+            if (!result.records || !result.records[insightId]) {
+                console.log('No record found for ID:', insightId);
+                return null;
+            }
+
+            const metadata = result.records[insightId].metadata;
+            console.log('Retrieved metadata:', JSON.stringify(metadata, null, 2));
+            return metadata;
         } catch (error) {
             console.error('Error getting insight:', error);
             throw error;
@@ -173,6 +165,34 @@ class PineconeService {
             }));
         } catch (error) {
             console.error('Error querying insights:', error);
+            throw error;
+        }
+    }
+
+    async upsert(document) {
+        try {
+            await this.initialize();
+            
+            if (!document.id || !document.values || !document.metadata) {
+                throw new Error('Invalid document format. Required: id, values, and metadata');
+            }
+
+            if (document.values.length !== this.dimensions) {
+                throw new Error(`Invalid vector dimensions. Expected ${this.dimensions}, got ${document.values.length}`);
+            }
+
+            // Use the correct upsert format
+            await this.pineconeIndex.upsert([
+                {
+                    id: document.id,
+                    values: document.values,
+                    metadata: document.metadata
+                }
+            ]);
+
+            return document.id;
+        } catch (error) {
+            console.error('Error upserting document:', error);
             throw error;
         }
     }

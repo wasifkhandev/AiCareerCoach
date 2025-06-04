@@ -160,43 +160,31 @@ class JobScraperService {
                 throw new Error('No jobs found on Dice.com');
             }
 
-            // Process jobs sequentially instead of in parallel to avoid overwhelming the server
+            // Process jobs sequentially to get full descriptions
             const jobsWithFullDetails = [];
             for (const jobSummary of jobSummaries) {
                 try {
                     const fullDescription = await this.getFullJobDescription(page, jobSummary.url);
-                    const job = { ...jobSummary, description: fullDescription };
-
-                    // Get insights using the full job object
-                    const insights = await this.getJobInsights(job);
-                    job.insights = insights;
-
-                    // Store in vector DB with proper error handling
-                    try {
-                        const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                        await this.storeJobInVectorDB({ 
-                            ...job, 
-                            id: jobId 
-                        });
-                        job.id = jobId;
-                        console.log(`Successfully stored job ${job.title} in vector DB`);
-                    } catch (error) {
-                        console.error('Error storing in vector DB:', error);
-                        // Continue without failing
-                    }
-
+                    const job = { 
+                        ...jobSummary, 
+                        description: fullDescription,
+                        keywords: keywords,
+                        location: location
+                    };
                     jobsWithFullDetails.push(job);
                 } catch (error) {
                     console.error(`Error processing job ${jobSummary.title}:`, error);
                     jobsWithFullDetails.push({ 
                         ...jobSummary, 
-                        description: `Failed to process job: ${error.message}` 
+                        description: `Failed to process job: ${error.message}`,
+                        keywords: keywords,
+                        location: location
                     });
                 }
             }
 
             await page.close();
-            console.log(`Successfully scraped and processed ${jobsWithFullDetails.length} jobs from Dice public site.`);
+            console.log(`Successfully scraped ${jobsWithFullDetails.length} jobs from Dice public site.`);
             return jobsWithFullDetails;
         } catch (error) {
             console.error('Error scraping Dice jobs:', error);
@@ -219,77 +207,88 @@ class JobScraperService {
             while (retryCount < maxRetries) {
                 try {
                     await page.goto(jobUrl, { 
-                        waitUntil: 'domcontentloaded',
+                        waitUntil: 'networkidle0', // Wait until network is idle
                         timeout: 60000
                     });
-                    break; // If successful, break the retry loop
+                    break;
                 } catch (error) {
                     retryCount++;
                     if (retryCount === maxRetries) {
                         throw error;
                     }
                     console.log(`Retry ${retryCount} for ${jobUrl}`);
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
-            // Wait for the page to be fully loaded using a more reliable method
-            await page.evaluate(() => {
-                return new Promise((resolve) => {
-                    if (document.readyState === 'complete') {
-                        resolve();
-                    } else {
-                        window.addEventListener('load', resolve);
-                    }
-                });
-            });
+            // Wait for the page to be fully loaded
+            await page.waitForFunction(() => {
+                return document.readyState === 'complete';
+            }, { timeout: 10000 });
 
-            // Try to get the job description using multiple approaches
+            // Updated selectors for Dice.com's current structure
+            const selectors = [
+                'div[data-testid="job-description"]',
+                'div[data-cy="job-description"]',
+                'div[class*="job-description"]',
+                'div[class*="description"]',
+                'div[itemprop="description"]',
+                'div[class*="job-details"]',
+                'div[class*="jobDescription"]',
+                'div[class*="job-detail-description"]',
+                'div[class*="job-detail__description"]',
+                'div[class*="job-details__description"]',
+                'div[class*="job-details-description"]',
+                'div[class*="job-details__content"]',
+                'div[class*="job-details-content"]',
+                'div[class*="job-details__body"]',
+                'div[class*="job-details-body"]'
+            ];
+
             let description = '';
 
-            // Approach 1: Try the main job description container
-            try {
-                const mainSelector = 'div[data-testid="job-description"]';
-                await page.waitForSelector(mainSelector, { timeout: 10000 });
-                description = await page.evaluate((selector) => {
-                    const element = document.querySelector(selector);
-                    return element ? element.textContent.trim() : '';
-                }, mainSelector);
-            } catch (error) {
-                console.log('Main selector not found, trying alternatives');
-            }
+            // Try each selector
+            for (const selector of selectors) {
+                try {
+                    const element = await page.$(selector);
+                    if (element) {
+                        const text = await page.evaluate(el => {
+                            // Get all text content, including nested elements
+                            const getTextContent = (node) => {
+                                let text = '';
+                                if (node.nodeType === Node.TEXT_NODE) {
+                                    text += node.textContent;
+                                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                                    // Handle lists
+                                    if (node.tagName === 'UL' || node.tagName === 'OL') {
+                                        text += '\n';
+                                        Array.from(node.children).forEach(li => {
+                                            text += '• ' + getTextContent(li) + '\n';
+                                        });
+                                    } else {
+                                        // Handle other elements
+                                        Array.from(node.childNodes).forEach(child => {
+                                            text += getTextContent(child);
+                                        });
+                                    }
+                                }
+                                return text;
+                            };
+                            return getTextContent(el).trim();
+                        }, element);
 
-            // Approach 2: Try alternative selectors if main selector fails
-            if (!description || description.length < 50) {
-                const alternativeSelectors = [
-                    'div[data-cy="job-description"]',
-                    'div[class*="job-description"]',
-                    'div[class*="description"]',
-                    'div[itemprop="description"]',
-                    'div[class*="job-details"]',
-                    'div[class*="jobDescription"]',
-                    'div[class*="job-detail-description"]',
-                    'div[class*="job-detail__description"]'
-                ];
-
-                for (const selector of alternativeSelectors) {
-                    try {
-                        const element = await page.$(selector);
-                        if (element) {
-                            const text = await page.evaluate(el => el.textContent.trim(), element);
-                            if (text && text.length > 50) {
-                                description = text;
-                                console.log(`Found description using selector: ${selector}`);
-                                break;
-                            }
+                        if (text && text.length > 50) {
+                            description = text;
+                            console.log(`Found description using selector: ${selector}`);
+                            break;
                         }
-                    } catch (error) {
-                        console.log(`Selector ${selector} not found`);
                     }
+                } catch (error) {
+                    console.log(`Selector ${selector} not found`);
                 }
             }
 
-            // Approach 3: Try to get content from the main content area
+            // If no description found, try getting content from the main content area
             if (!description || description.length < 50) {
                 try {
                     const mainContent = await page.$('main');
@@ -305,22 +304,13 @@ class JobScraperService {
                 }
             }
 
-            // Approach 4: Try to get any meaningful content from the page
-            if (!description || description.length < 50) {
-                try {
-                    const bodyText = await page.evaluate(() => {
-                        const content = document.body.textContent.trim();
-                        // Remove excessive whitespace and normalize
-                        return content.replace(/\s+/g, ' ').trim();
-                    });
-                    
-                    if (bodyText && bodyText.length > 50) {
-                        description = bodyText;
-                        console.log('Falling back to body text');
-                    }
-                } catch (error) {
-                    console.log('Could not get body text');
-                }
+            // Clean up the description
+            if (description) {
+                description = description
+                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                    .replace(/\n\s*\n/g, '\n\n') // Replace multiple newlines with double newline
+                    .replace(/•\s+/g, '• ') // Fix bullet point spacing
+                    .trim();
             }
 
             if (!description || description.length < 50) {
@@ -437,7 +427,7 @@ class JobScraperService {
             // Get similar jobs from vector DB for context
             let similarJobsContext = '';
             try {
-                const similarJobs = await this.pineconeService.querySimilarJobs(job.description, 5);
+                const similarJobs = await this.pineconeService.querySimilarInsights(job.description, { type: 'job_analytics' });
                 if (similarJobs && similarJobs.length > 0) {
                     similarJobsContext = similarJobs.map(similarJob => `
                         Title: ${similarJob.title}
@@ -518,24 +508,31 @@ class JobScraperService {
             const insights = response.choices[0].message.content;
             console.log('Generated insights for job:', job.title);
 
-            // Store the job and insights in Pinecone
+            // Store the analytics in Pinecone
             try {
-                const jobId = await this.pineconeService.storeJob({
-                    ...jobData,
-                    insights: insights
+                const analyticsId = `analytics_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                await this.pineconeService.upsert({
+                    id: analyticsId,
+                    values: await this.getEmbedding(insights),
+                    metadata: {
+                        type: 'job_analytics',
+                        title: jobData.title,
+                        company: jobData.company,
+                        location: jobData.location,
+                        salary: jobData.salary,
+                        jobType: jobData.jobType,
+                        postedDate: jobData.postedDate,
+                        insights: insights,
+                        timestamp: new Date().toISOString(),
+                        source: 'job_scraper',
+                        category: 'market_analysis'
+                    }
                 });
 
-                // Verify the storage
-                const isStored = await this.pineconeService.verifyStorage(jobId);
-                if (isStored) {
-                    console.log('Successfully stored job and insights in Pinecone');
-                } else {
-                    console.error('Failed to verify job storage in Pinecone');
-                }
-
+                console.log('Successfully stored job analytics in Pinecone');
                 return insights;
             } catch (error) {
-                console.error('Error storing job in Pinecone:', error);
+                console.error('Error storing analytics in Pinecone:', error);
                 // Continue without failing
                 return insights;
             }
@@ -550,8 +547,8 @@ class JobScraperService {
             // Generate embedding for the job description
             const embedding = await this.getEmbedding(job.description);
             
-            // Prepare the document for Pinecone
-            const document = {
+            // Store in Pinecone using the service
+            await this.pineconeService.upsert({
                 id: job.id,
                 values: embedding,
                 metadata: {
@@ -568,10 +565,8 @@ class JobScraperService {
                     insights: job.insights,
                     timestamp: new Date().toISOString()
                 }
-            };
+            });
 
-            // Store in Pinecone using the service
-            await this.pineconeService.upsert(document);
             console.log(`Successfully stored job ${job.title} in vector DB`);
             return job.id;
         } catch (error) {
@@ -595,4 +590,21 @@ class JobScraperService {
 
 }
 
-module.exports = JobScraperService; 
+// Create a singleton instance
+const jobScraperService = new JobScraperService();
+
+// Export the scrapeJobs function
+const scrapeJobs = async (keywords, location) => {
+    try {
+        const jobs = await jobScraperService.scrapeDiceJobs(keywords, location);
+        return jobs;
+    } catch (error) {
+        console.error('Error in scrapeJobs:', error);
+        throw error;
+    }
+};
+
+module.exports = {
+    scrapeJobs,
+    JobScraperService
+}; 

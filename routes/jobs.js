@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { PineconeClient } = require('@pinecone-database/pinecone');
+const { Pinecone } = require('@pinecone-database/pinecone');
 const auth = require('../middleware/auth');
-const { getEmbedding } = require('../services/openai_service');
+const { OpenAI } = require('openai');
 const { scrapeJobs } = require('../services/job_scraper_service');
 const PineconeService = require('../services/pinecone_service');
+
+// Initialize OpenAI
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
 
 // Initialize Pinecone client
 let pinecone;
@@ -16,12 +21,10 @@ const initializePinecone = async () => {
             throw new Error('Missing Pinecone environment variables');
         }
 
-        pinecone = new PineconeClient();
-        await pinecone.init({
-            environment: process.env.PINECONE_ENVIRONMENT,
+        pinecone = new Pinecone({ 
             apiKey: process.env.PINECONE_API_KEY
         });
-        index = pinecone.Index(process.env.PINECONE_INDEX);
+        index = pinecone.index(process.env.PINECONE_INDEX);
         console.log('Pinecone initialized successfully');
     } catch (error) {
         console.error('Error initializing Pinecone:', error);
@@ -32,8 +35,94 @@ const initializePinecone = async () => {
 // Initialize Pinecone when the server starts
 initializePinecone().catch(console.error);
 
-// Store insights in Pinecone
-const storeInsights = async (jobData, insights) => {
+// Get embedding from OpenAI
+const getEmbedding = async (text) => {
+    try {
+        const response = await openai.embeddings.create({
+            model: "text-embedding-ada-002",
+            input: text
+        });
+        return response.data[0].embedding;
+    } catch (error) {
+        console.error('Error getting embedding:', error);
+        throw error;
+    }
+};
+
+// Generate combined insights for multiple jobs
+const generateCombinedInsights = async (jobs) => {
+    try {
+        const prompt = `As a job market analyst, analyze these job listings and provide comprehensive combined insights:
+
+        Jobs to Analyze:
+        ${jobs.map(job => `
+        Title: ${job.title}
+        Company: ${job.company}
+        Location: ${job.location}
+        Salary: ${job.salary}
+        Job Type: ${job.jobType}
+        Description: ${job.description}
+        `).join('\n')}
+
+        Please provide a detailed analysis in the following format:
+
+        1. Market Overview
+        - Current demand trends for these roles
+        - Salary ranges and compensation patterns
+        - Common job types and work arrangements
+        - Industry distribution
+
+        2. Required Skills Analysis
+        - Most common technical skills
+        - Required experience levels
+        - Emerging technologies
+        - Soft skills and qualifications
+
+        3. Company Insights
+        - Industry distribution
+        - Company size patterns
+        - Work culture indicators
+        - Growth opportunities
+
+        4. Career Opportunities
+        - Growth potential
+        - Career paths
+        - Required qualifications
+        - Professional development
+
+        5. Market Trends
+        - Industry trends
+        - Demand for these roles
+        - Competitive position
+        - Future outlook
+
+        Format each section with clear bullet points and specific details.`;
+
+        const response = await openai.chat.completions.create({
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a job market analyst with expertise in technology roles. Provide detailed, actionable insights about job listings. Focus on technical skills, market trends, and career opportunities."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000
+        });
+
+        return response.choices[0].message.content;
+    } catch (error) {
+        console.error('Error generating combined insights:', error);
+        throw error;
+    }
+};
+
+// Store combined insights in Pinecone
+const storeCombinedInsights = async (jobs, insights) => {
     try {
         if (!pinecone || !index) {
             await initializePinecone();
@@ -45,29 +134,32 @@ const storeInsights = async (jobData, insights) => {
         // Create a unique ID for the insights
         const insightId = `insight_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        // Store in Pinecone
-        await index.upsert({
-            vectors: [{
+        // Convert jobs array to a string representation
+        const jobsString = jobs.map(job => 
+            `${job.title}|${job.company}|${job.location}|${job.jobType}|${job.salary}`
+        ).join(';');
+
+        // Store in Pinecone using the correct format
+        await index.upsert([
+            {
                 id: insightId,
                 values: embedding,
                 metadata: {
-                    jobTitle: jobData.title,
-                    company: jobData.company,
-                    location: jobData.location,
-                    jobType: jobData.jobType,
-                    salary: jobData.salary,
-                    description: jobData.description,
+                    type: 'combined_job_insight',
+                    jobs_data: jobsString, // Store as a single string
                     insights: insights,
                     timestamp: new Date().toISOString(),
-                    type: 'job_insight'
+                    keywords: jobs[0].keywords,
+                    location: jobs[0].location,
+                    job_count: jobs.length.toString() // Store count as string
                 }
-            }]
-        });
+            }
+        ]);
 
-        console.log('Insights stored successfully in Pinecone');
+        console.log('Combined insights stored successfully in Pinecone');
         return insightId;
     } catch (error) {
-        console.error('Error storing insights:', error);
+        console.error('Error storing combined insights:', error);
         throw error;
     }
 };
@@ -87,25 +179,25 @@ router.get('/search', async (req, res) => {
         const jobs = await scrapeJobs(keywords, location);
         console.log(`Found ${jobs.length} jobs`);
 
-        // Store insights for each job in Pinecone
-        const jobsWithInsights = await Promise.all(jobs.map(async (job) => {
-            if (job.insights) {
-                try {
-                    const insightId = await storeInsights(job, job.insights);
-                    return { ...job, insightId };
-                } catch (error) {
-                    console.error(`Error storing insights for job ${job.title}:`, error);
-                    return job;
-                }
-            }
-            return job;
-        }));
+        // Generate combined insights for all jobs
+        console.log('Generating combined insights...');
+        const combinedInsights = await generateCombinedInsights(jobs);
+        console.log('Combined insights generated successfully');
 
-        res.json({ jobs: jobsWithInsights });
+        // Store the combined insights
+        console.log('Storing combined insights...');
+        const insightId = await storeCombinedInsights(jobs, combinedInsights);
+        console.log('Combined insights stored successfully');
+
+        res.json({ 
+            jobs: jobs,
+            insightId: insightId,
+            insights: combinedInsights
+        });
     } catch (err) {
-        console.error('Error scraping jobs:', err);
+        console.error('Error in job search:', err);
         res.status(500).json({ 
-            message: 'Failed to scrape jobs',
+            message: 'Failed to process jobs',
             error: err.message 
         });
     }

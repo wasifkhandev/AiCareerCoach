@@ -14,18 +14,6 @@ import {
     Chip,
     CircularProgress,
     Alert,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    IconButton,
-    Tooltip,
-    Tabs,
-    Tab,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
     Snackbar,
     LinearProgress,
     Divider,
@@ -34,7 +22,14 @@ import {
     ListItemText,
     ListItemIcon,
     Collapse,
-    Stack
+    Stack,
+    IconButton,
+    Tooltip,
+    Fade,
+    Zoom,
+    Grow,
+    useTheme,
+    alpha
 } from '@mui/material';
 import {
     Search as SearchIcon,
@@ -54,73 +49,277 @@ import {
     Assignment as AssignmentIcon,
     Group as GroupIcon,
     Delete as DeleteIcon,
-    Description as DescriptionIcon
+    Description as DescriptionIcon,
+    OpenInNew as OpenInNewIcon,
+    TrendingUp as TrendingUpIcon,
+    Lightbulb as LightbulbIcon,
+    Psychology as PsychologyIcon,
+    EmojiEvents as EmojiEventsIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 const API_URL = 'http://localhost:5000/api';
 
-const JobAnalysis = ({ analysis }) => {
-    if (!analysis) return null;
+const LoadingAnimation = ({ stage }) => {
+    const theme = useTheme();
+    const [progress, setProgress] = useState(0);
 
-    // Split analysis into sections
-    const sections = analysis.split('\n\n').filter(section => section.trim());
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setProgress((oldProgress) => {
+                const diff = Math.random() * 10;
+                return Math.min(oldProgress + diff, 100);
+            });
+        }, 500);
+
+        return () => {
+            clearInterval(timer);
+        };
+    }, []);
 
     return (
-        <Paper elevation={2} sx={{ p: 3, mt: 4, bgcolor: 'background.default' }}>
-            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'primary.main' }}>
-                <AssignmentIcon color="primary" />
-                Market Analysis
-            </Typography>
-            
-            {sections.map((section, index) => {
-                const [title, ...content] = section.split('\n');
-                return (
-                    <Box key={index} sx={{ mb: 3 }}>
-                        <Typography variant="h6" sx={{ 
-                            color: 'primary.main',
-                            mb: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1
-                        }}>
-                            {title}
+        <Fade in={true}>
+            <Paper 
+                elevation={3} 
+                sx={{ 
+                    p: 4, 
+                    mt: 3, 
+                    bgcolor: alpha(theme.palette.primary.main, 0.05),
+                    borderRadius: 2
+                }}
+            >
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                    <CircularProgress 
+                        size={32} 
+                        sx={{ 
+                            mr: 2,
+                            color: theme.palette.primary.main
+                        }} 
+                    />
+                    <Typography variant="h6" color="primary">
+                        {stage}
+                    </Typography>
+                </Box>
+                <LinearProgress 
+                    variant="determinate" 
+                    value={progress} 
+                    sx={{ 
+                        height: 8,
+                        borderRadius: 4,
+                        bgcolor: alpha(theme.palette.primary.main, 0.1),
+                        '& .MuiLinearProgress-bar': {
+                            borderRadius: 4,
+                        }
+                    }}
+                />
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                    Please wait while we analyze the job market...
+                </Typography>
+            </Paper>
+        </Fade>
+    );
+};
+
+const JobCard = ({ job, index }) => {
+    const [expanded, setExpanded] = useState(false);
+    const theme = useTheme();
+
+    // Format the description to handle line breaks and bullet points
+    const formatDescription = (description) => {
+        if (!description) return 'No detailed description available.';
+        
+        // Split by common line break patterns
+        const lines = description.split(/\n|\r\n|\r/);
+        
+        // Process each line
+        return lines.map((line, i) => {
+            // Handle bullet points
+            if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
+                return `• ${line.trim().substring(1).trim()}`;
+            }
+            // Handle numbered lists
+            if (/^\d+\./.test(line.trim())) {
+                return line.trim();
+            }
+            // Handle section headers
+            if (line.trim().toUpperCase() === line.trim() && line.trim().length > 0) {
+                return `\n${line.trim()}\n`;
+            }
+            return line.trim();
+        }).join('\n');
+    };
+
+    // Get preview of description (first 200 characters)
+    const getDescriptionPreview = (description) => {
+        if (!description) return 'No detailed description available.';
+        const formatted = formatDescription(description);
+        return formatted.length > 200 ? formatted.substring(0, 200) + '...' : formatted;
+    };
+
+    return (
+        <Grow in={true} timeout={500 + (index * 100)}>
+            <Card 
+                elevation={2} 
+                sx={{ 
+                    mb: 2,
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                        transform: 'translateY(-4px)',
+                        boxShadow: theme.shadows[4]
+                    }
+                }}
+            >
+                <CardContent>
+                    <Typography variant="h6" gutterBottom sx={{ color: theme.palette.primary.main }}>
+                        {job.title}
+                    </Typography>
+                    
+                    <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
+                        <Chip
+                            icon={<BusinessIcon />}
+                            label={job.company}
+                            variant="outlined"
+                            size="small"
+                        />
+                        <Chip
+                            icon={<LocationIcon />}
+                            label={job.location}
+                            variant="outlined"
+                            size="small"
+                        />
+                        {job.salary && (
+                            <Chip
+                                icon={<MoneyIcon />}
+                                label={job.salary}
+                                variant="outlined"
+                                size="small"
+                            />
+                        )}
+                        {job.jobType && (
+                            <Chip
+                                icon={<WorkIcon />}
+                                label={job.jobType}
+                                variant="outlined"
+                                size="small"
+                            />
+                        )}
+                    </Stack>
+
+                    <Box sx={{ mt: 2 }}>
+                        <Typography 
+                            variant="body2" 
+                            color="text.secondary" 
+                            sx={{ 
+                                whiteSpace: 'pre-line',
+                                '& ul': { pl: 2 },
+                                '& li': { mb: 1 },
+                                '& h3': { mt: 2, mb: 1, color: 'primary.main', fontWeight: 'bold' },
+                                '& h4': { mt: 1.5, mb: 1, color: 'text.secondary', fontWeight: 'medium' },
+                                '& p': { mb: 1 },
+                                '& strong': { color: 'primary.main' },
+                                '& em': { color: 'text.secondary' },
+                                '& ul, & ol': { pl: 2, mb: 1 },
+                                '& li': { mb: 0.5 },
+                                '& br': { mb: 1 }
+                            }}
+                        >
+                            {expanded ? formatDescription(job.description) : getDescriptionPreview(job.description)}
                         </Typography>
-                        <List dense>
-                            {content.map((item, itemIndex) => {
-                                const trimmedItem = item.trim();
-                                if (trimmedItem.startsWith('-')) {
-                                    return (
-                                        <ListItem key={itemIndex}>
-                                            <ListItemIcon>
-                                                <ExpandMoreIcon />
-                                            </ListItemIcon>
-                                            <ListItemText primary={trimmedItem.substring(1).trim()} />
-                                        </ListItem>
-                                    );
-                                }
-                                return null;
-                            })}
-                        </List>
+                        <Button
+                            size="small"
+                            onClick={() => setExpanded(!expanded)}
+                            sx={{ mt: 1 }}
+                        >
+                            {expanded ? 'Show Less' : 'Show More'}
+                        </Button>
                     </Box>
-                );
-            })}
-        </Paper>
+                </CardContent>
+                <CardActions sx={{ justifyContent: 'flex-end', px: 2, pb: 2 }}>
+                    {job.url && (
+                        <Button
+                            size="small"
+                            href={job.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            endIcon={<OpenInNewIcon />}
+                            variant="contained"
+                        >
+                            View on Dice
+                        </Button>
+                    )}
+                </CardActions>
+            </Card>
+        </Grow>
+    );
+};
+
+const NextSteps = () => {
+    const navigate = useNavigate();
+    const theme = useTheme();
+
+    const handleCareerCoach = () => {
+        navigate('/mcp');
+    };
+
+    return (
+        <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
+            <Card 
+                elevation={2}
+                sx={{ 
+                    maxWidth: 400,
+                    width: '100%',
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                        transform: 'translateY(-4px)',
+                        boxShadow: 4
+                    }
+                }}
+            >
+                <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <PsychologyIcon color="primary" sx={{ fontSize: 32 }} />
+                        <Typography variant="h6" sx={{ ml: 1 }}>
+                            Career Coach
+                        </Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Get personalized career guidance and advice from our AI-powered career coach
+                    </Typography>
+                </CardContent>
+                <CardActions>
+                    <Button 
+                        fullWidth 
+                        variant="contained"
+                        size="large"
+                        startIcon={<PsychologyIcon />}
+                        onClick={handleCareerCoach}
+                        sx={{ 
+                            py: 1.5,
+                            fontSize: '1.1rem',
+                            fontWeight: 'medium'
+                        }}
+                    >
+                        Talk to Career Coach
+                    </Button>
+                </CardActions>
+            </Card>
+        </Box>
     );
 };
 
 const JobScraper = () => {
     const { token } = useSelector((state) => state.auth);
+    const theme = useTheme();
     const [formData, setFormData] = useState({
         keywords: '',
         location: '',
     });
     const [loading, setLoading] = useState(false);
+    const [loadingStage, setLoadingStage] = useState('');
     const [error, setError] = useState(null);
     const [jobs, setJobs] = useState([]);
-    const [analysis, setAnalysis] = useState(null);
-    const [selectedJob, setSelectedJob] = useState(null);
-    const [showJobDetails, setShowJobDetails] = useState(false);
+    const [insights, setInsights] = useState(null);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
     const handleChange = (e) => {
@@ -139,24 +338,31 @@ const JobScraper = () => {
         }
 
         setLoading(true);
+        setLoadingStage('Scraping jobs from Dice.com...');
         setError(null);
         setJobs([]);
-        setAnalysis(null);
+        setInsights(null);
         
         try {
             const response = await axios.get(`${API_URL}/jobs/search`, {
                 params: {
                     keywords: keywords,
                     location: location
+                },
+                headers: {
+                    Authorization: `Bearer ${token}`
                 }
             });
 
+            setLoadingStage('Analyzing job market trends...');
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
             setJobs(response.data.jobs || []);
-            setAnalysis(response.data.analysis);
+            setInsights(response.data.insights);
 
             setSnackbar({
                 open: true,
-                message: `Successfully found ${response.data.jobs.length} jobs and stored insights`,
+                message: `Successfully found ${response.data.jobs.length} jobs and generated insights`,
                 severity: 'success'
             });
         } catch (err) {
@@ -169,206 +375,143 @@ const JobScraper = () => {
             });
         } finally {
             setLoading(false);
+            setLoadingStage('');
         }
-    };
-
-    const handleJobClick = (job) => {
-        setSelectedJob(job);
-        setShowJobDetails(true);
     };
 
     const handleCloseSnackbar = () => {
         setSnackbar({ ...snackbar, open: false });
     };
 
-    const renderJobCard = (job) => {
-        return (
-            <Card key={job.url} sx={{ mb: 2 }}>
-                <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                        {job.title}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-                        <Chip
-                            icon={<BusinessIcon />}
-                            label={job.company}
-                            variant="outlined"
-                        />
-                        <Chip
-                            icon={<LocationIcon />}
-                            label={job.location}
-                            variant="outlined"
-                        />
-                        {job.salary && (
-                            <Chip
-                                icon={<MoneyIcon />}
-                                label={job.salary}
-                                variant="outlined"
-                            />
-                        )}
-                        {job.jobType && (
-                            <Chip
-                                icon={<WorkIcon />}
-                                label={job.jobType}
-                                variant="outlined"
-                            />
-                        )}
-                    </Box>
-                    <Typography
-                        variant="body2"
-                        color="text.secondary"
-                        sx={{
-                            maxHeight: '100px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 4,
-                            WebkitBoxOrient: 'vertical',
-                            mb: 2
-                        }}
-                    >
-                        {job.description || 'No description available'}
-                    </Typography>
-                </CardContent>
-                <CardActions>
-                    {job.url && (
-                        <Button
-                            size="small"
-                            href={job.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            startIcon={<SearchIcon />}
-                        >
-                            View Job
-                        </Button>
-                    )}
-                    <Button
-                        size="small"
-                        onClick={() => handleJobClick(job)}
-                        startIcon={<DescriptionIcon />}
-                    >
-                        View Details
-                    </Button>
-                </CardActions>
-            </Card>
-        );
-    };
-
     return (
-        <Container maxWidth="lg" sx={{ py: 4 }}>
-            <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
-                <Typography variant="h4" gutterBottom>
-                    Job Search & Analysis
-                </Typography>
-                <Typography variant="body1" color="text.secondary" paragraph>
-                    Search and analyze job postings with AI-powered insights
-                </Typography>
+        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+            <Typography variant="h4" component="h1" gutterBottom>
+                Job Market Analysis
+            </Typography>
+            <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+                Search for jobs and get comprehensive market insights
+            </Typography>
 
-                <Grid container spacing={2} sx={{ mb: 3 }}>
-                    <Grid item xs={12} md={6}>
+            <Paper 
+                elevation={3} 
+                sx={{ 
+                    p: 3, 
+                    mt: 3,
+                    borderRadius: 2,
+                    bgcolor: alpha(theme.palette.background.paper, 0.8)
+                }}
+            >
+                <Grid container spacing={2}>
+                    <Grid item xs={12} md={5}>
                         <TextField
                             fullWidth
-                            label="Keywords"
                             name="keywords"
+                            label="Keywords"
                             value={formData.keywords}
                             onChange={handleChange}
-                            placeholder="e.g., Software Engineer, React Developer"
+                            placeholder="e.g., machine learning, software engineer"
+                            variant="outlined"
+                            InputProps={{
+                                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                            }}
                         />
                     </Grid>
-                    <Grid item xs={12} md={6}>
+                    <Grid item xs={12} md={5}>
                         <TextField
                             fullWidth
-                            label="Location"
                             name="location"
+                            label="Location"
                             value={formData.location}
                             onChange={handleChange}
                             placeholder="e.g., New York, Remote"
+                            variant="outlined"
+                            InputProps={{
+                                startAdornment: <LocationIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                            }}
                         />
                     </Grid>
+                    <Grid item xs={12} md={2}>
+                        <Button
+                            fullWidth
+                            variant="contained"
+                            onClick={handleScrape}
+                            disabled={!formData.keywords || !formData.location || loading}
+                            sx={{ height: '56px' }}
+                        >
+                            {loading ? <CircularProgress size={24} color="inherit" /> : 'Search'}
+                        </Button>
+                    </Grid>
                 </Grid>
-
-                <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-                    <Button
-                        variant="contained"
-                        startIcon={<SearchIcon />}
-                        onClick={handleScrape}
-                        disabled={loading || !formData.keywords || !formData.location}
-                    >
-                        {loading ? <CircularProgress size={24} color="inherit" /> : 'Search Jobs'}
-                    </Button>
-                </Box>
-
-                {error && (
-                    <Alert severity="error" sx={{ mb: 2 }}>
-                        {error}
-                    </Alert>
-                )}
-
-                {jobs.length > 0 && (
-                    <>
-                        <Typography variant="h5" gutterBottom sx={{ mt: 4 }}>
-                            Job Listings
-                        </Typography>
-                        {jobs.map((job) => renderJobCard(job))}
-                        
-                        {/* Display comprehensive analysis */}
-                        {jobs[0]?.insights && (
-                            <JobAnalysis analysis={jobs[0].insights} />
-                        )}
-                    </>
-                )}
-
-                {/* Job Details Dialog */}
-                <Dialog
-                    open={showJobDetails}
-                    onClose={() => setShowJobDetails(false)}
-                    maxWidth="md"
-                    fullWidth
-                >
-                    {selectedJob && (
-                        <>
-                            <DialogTitle>
-                                <Typography variant="h6">
-                                    {selectedJob.title} at {selectedJob.company}
-                                </Typography>
-                                <Typography variant="subtitle2" color="text.secondary">
-                                    {selectedJob.location} • {selectedJob.jobType}
-                                </Typography>
-                            </DialogTitle>
-                            <DialogContent dividers>
-                                <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                                    {selectedJob.description || 'No detailed description available.'}
-                                </Typography>
-                            </DialogContent>
-                            <DialogActions>
-                                <Button onClick={() => setShowJobDetails(false)}>Close</Button>
-                                {selectedJob.url && (
-                                    <Button
-                                        href={selectedJob.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        startIcon={<SearchIcon />}
-                                    >
-                                        View on Dice
-                                    </Button>
-                                )}
-                            </DialogActions>
-                        </>
-                    )}
-                </Dialog>
-
-                {/* Snackbar for notifications */}
-                <Snackbar
-                    open={snackbar.open}
-                    autoHideDuration={6000}
-                    onClose={handleCloseSnackbar}
-                    anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-                >
-                    <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
-                        {snackbar.message}
-                    </Alert>
-                </Snackbar>
             </Paper>
+
+            {loading && <LoadingAnimation stage={loadingStage} />}
+
+            {error && (
+                <Alert severity="error" sx={{ mt: 2 }}>
+                    {error}
+                </Alert>
+            )}
+
+            {jobs.length > 0 && !loading && (
+                <Grid container spacing={3} sx={{ mt: 2 }}>
+                    {/* Jobs List */}
+                    <Grid item xs={12} md={6}>
+                        <Card elevation={2} sx={{ borderRadius: 2 }}>
+                            <CardContent>
+                                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <WorkIcon color="primary" />
+                                    Found Jobs ({jobs.length})
+                                </Typography>
+                                <Divider sx={{ mb: 2 }} />
+                                {jobs.map((job, index) => (
+                                    <JobCard key={index} job={job} index={index} />
+                                ))}
+                            </CardContent>
+                        </Card>
+                    </Grid>
+
+                    {/* Market Insights */}
+                    <Grid item xs={12} md={6}>
+                        <Card elevation={2} sx={{ borderRadius: 2 }}>
+                            <CardContent>
+                                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                                    <AssignmentIcon sx={{ mr: 1, color: 'primary.main' }} />
+                                    <Typography variant="h6">
+                                        Market Insights
+                                    </Typography>
+                                </Box>
+                                <Divider sx={{ mb: 2 }} />
+                                <Typography
+                                    variant="body1"
+                                    component="div"
+                                    sx={{ 
+                                        whiteSpace: 'pre-line',
+                                        '& ul': { pl: 2 },
+                                        '& li': { mb: 1 },
+                                        '& h3': { mt: 2, mb: 1, color: 'primary.main' },
+                                        '& h4': { mt: 1.5, mb: 1, color: 'text.secondary' }
+                                    }}
+                                >
+                                    {insights}
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                </Grid>
+            )}
+
+            {jobs.length > 0 && !loading && <NextSteps />}
+
+            <Snackbar
+                open={snackbar.open}
+                autoHideDuration={6000}
+                onClose={handleCloseSnackbar}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                <Alert onClose={handleCloseSnackbar} severity={snackbar.severity}>
+                    {snackbar.message}
+                </Alert>
+            </Snackbar>
         </Container>
     );
 };
