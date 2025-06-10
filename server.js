@@ -1,20 +1,26 @@
 const express = require('express');
 const cors = require('cors');
-const connectDB = require('./config/db');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
 const jobsRoutes = require('./routes/jobs');
-require('dotenv').config();
+const mcpRoutes = require('./routes/mcp');
+const { softAuth } = require('./middleware/auth');
+const authRoutes = require('./routes/auth');
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // Middleware
-app.use(cors({
-    origin: 'http://localhost:3000',
-    credentials: true
-}));
+app.use(cors());
 app.use(express.json());
+app.use(softAuth);
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/career-ai-coach')
+    .then(() => console.log('MongoDB Connected:', mongoose.connection.host))
+    .catch(err => console.error('MongoDB connection error:', err));
 
 // Debug middleware to log requests
 app.use((req, res, next) => {
@@ -26,6 +32,8 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/jobs', jobsRoutes);
+app.use('/api/mcp', mcpRoutes);
+app.use('/api/auth', authRoutes);
 
 // Test route
 app.get('/api/test', (req, res) => {

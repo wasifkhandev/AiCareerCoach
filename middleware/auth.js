@@ -1,22 +1,18 @@
 const jwt = require('jsonwebtoken');
 
-module.exports = function(req, res, next) {
-    // Get token from header
-    const token = req.header('x-auth-token');
-
-    // Check if no token
+const softAuth = (req, res, next) => {
+    const token = req.header('x-auth-token') || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
     if (!token) {
-        return res.status(401).json({ message: 'No token, authorization denied' });
+        req.user = null; // No user, but don't block
+        return next();
     }
-
     try {
-        // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Add user from payload
         req.user = decoded.user;
-        next();
     } catch (err) {
-        res.status(401).json({ message: 'Token is not valid' });
+        req.user = null; // Invalid token, treat as guest
     }
-}; 
+    next();
+};
+
+module.exports = { softAuth }; 

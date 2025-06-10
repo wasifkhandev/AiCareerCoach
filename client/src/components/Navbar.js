@@ -20,6 +20,8 @@ const Navbar = () => {
   const { isAuthenticated, user } = useSelector((state) => state.auth);
   const [anchorEl, setAnchorEl] = React.useState(null);
 
+  console.log('Navbar auth state:', { isAuthenticated, user });
+
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
   };
@@ -31,7 +33,7 @@ const Navbar = () => {
   const handleLogout = () => {
     dispatch(logout());
     handleClose();
-    navigate('/login');
+    window.location.href = '/login';
   };
 
   return (
@@ -52,6 +54,9 @@ const Navbar = () => {
               <Button color="inherit" onClick={() => navigate('/jobs')}>
                 Job Search
               </Button>
+              <Button color="inherit" onClick={() => navigate('/mcp')}>
+                Career Coach
+              </Button>
               <Button color="inherit" onClick={() => navigate('/resume')}>
                 Resume Builder
               </Button>
@@ -64,7 +69,7 @@ const Navbar = () => {
               aria-label="account of current user"
               aria-controls="menu-appbar"
               aria-haspopup="true"
-              onClick={handleMenu}
+              onClick={(e) => { console.log('Account icon clicked'); handleMenu(e); }}
               color="inherit"
             >
               <AccountCircle />
@@ -87,7 +92,7 @@ const Navbar = () => {
               <MenuItem onClick={() => { handleClose(); navigate('/profile'); }}>
                 Profile
               </MenuItem>
-              <MenuItem onClick={handleLogout}>Logout</MenuItem>
+              <MenuItem onClick={() => { console.log('Logout button clicked'); handleLogout(); }}>Logout</MenuItem>
             </Menu>
           </>
         ) : (

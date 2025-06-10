@@ -196,6 +196,24 @@ class PineconeService {
             throw error;
         }
     }
+
+    async storeSession(sessionData) {
+        await this.initialize();
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const dummyVector = [1, ...new Array(this.dimensions - 1).fill(0)];
+        await this.pineconeIndex.upsert([
+            {
+                id: sessionId,
+                values: dummyVector,
+                metadata: {
+                    ...sessionData,
+                    type: 'progress_session',
+                    timestamp: new Date().toISOString()
+                }
+            }
+        ]);
+        return sessionId;
+    }
 }
 
 module.exports = PineconeService;

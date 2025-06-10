@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Pinecone } = require('@pinecone-database/pinecone');
-const auth = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
 const { OpenAI } = require('openai');
 const { scrapeJobs } = require('../services/job_scraper_service');
 const PineconeService = require('../services/pinecone_service');
@@ -204,7 +204,7 @@ router.get('/search', async (req, res) => {
 });
 
 // Save a job
-router.post('/save', auth, async (req, res) => {
+router.post('/save', async (req, res) => {
     try {
         console.log('Received save job request:', req.body);
 
@@ -261,7 +261,7 @@ router.post('/save', auth, async (req, res) => {
 });
 
 // Get saved jobs
-router.get('/saved', auth, async (req, res) => {
+router.get('/saved', async (req, res) => {
     try {
         if (!pinecone || !index) {
             await initializePinecone();
@@ -298,7 +298,7 @@ router.get('/saved', auth, async (req, res) => {
 });
 
 // Delete saved job
-router.delete('/saved/:id', auth, async (req, res) => {
+router.delete('/saved/:id', async (req, res) => {
     try {
         if (!pinecone || !index) {
             await initializePinecone();

@@ -29,6 +29,18 @@ export const register = createAsyncThunk(
   }
 );
 
+export const loadUser = createAsyncThunk(
+  'auth/loadUser',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await axios.get(`${API_URL}/auth/me`);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response.data);
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: 'auth',
   initialState: {
@@ -78,6 +90,14 @@ const authSlice = createSlice({
       .addCase(register.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload?.message || 'Registration failed';
+      })
+      .addCase(loadUser.fulfilled, (state, action) => {
+        state.user = action.payload.user;
+        state.isAuthenticated = true;
+      })
+      .addCase(loadUser.rejected, (state) => {
+        state.user = null;
+        state.isAuthenticated = false;
       });
   }
 });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -7,8 +7,10 @@ import Home from './components/pages/Home';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import JobScraper from './components/jobs/JobScraper';
-import MCPDashboard from './components/mcp/MCPDashboard';
+import MyCareerPath from './components/MyCareerPath';
 import PrivateRoute from './components/routing/PrivateRoute';
+import { useDispatch } from 'react-redux';
+import { loadUser } from './store/authSlice';
 
 const theme = createTheme({
     palette: {
@@ -22,6 +24,10 @@ const theme = createTheme({
 });
 
 function App() {
+    const dispatch = useDispatch();
+    useEffect(() => {
+        dispatch(loadUser());
+    }, [dispatch]);
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
@@ -43,7 +49,7 @@ function App() {
                         path="/mcp"
                         element={
                             <PrivateRoute>
-                                <MCPDashboard />
+                                <MyCareerPath />
                             </PrivateRoute>
                         }
                     />

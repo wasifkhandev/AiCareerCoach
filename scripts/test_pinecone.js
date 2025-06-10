@@ -45,10 +45,10 @@ async function testPineconeService() {
             throw new Error('No similar insights found');
         }
 
-        console.log('All tests completed successfully! ✅');
+        console.log('All tests completed successfully! ');
 
     } catch (error) {
-        console.error('\n❌ Error during testing:', error);
+        console.error('\n Error during testing:', error);
         throw error;
     } finally {
         // Clean up test data
